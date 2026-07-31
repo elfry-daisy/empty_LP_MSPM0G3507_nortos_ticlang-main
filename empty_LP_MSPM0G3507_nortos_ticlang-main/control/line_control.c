@@ -11,6 +11,7 @@ static PID_Controller g_linePid;
 static float g_lastPosition;
 static float g_filtPosition;   /* 低通滤波后的位置 */
 static float g_lastSteering;
+static float g_steeringApplied; /* 经过速率限制后实际下发的转向 */
 static uint32_t g_lostCycles;
 
 static float absolute(float value) { return (value < 0.0f) ? -value : value; }
@@ -26,6 +27,7 @@ void LineControl_Init(void)
     g_lastPosition  = 0.0f;
     g_filtPosition  = 0.0f;
     g_lastSteering  = 0.0f;
+    g_steeringApplied = 0.0f;
     g_lostCycles    = 0U;
 }
 
@@ -35,6 +37,7 @@ void LineControl_Reset(void)
     g_lastPosition = 0.0f;
     g_filtPosition = 0.0f;
     g_lastSteering = 0.0f;
+    g_steeringApplied = 0.0f;
     g_lostCycles   = 0U;
 }
 
@@ -57,6 +60,17 @@ LineControl_Output LineControl_Update(const LineSensor_Data *line,
         if (absolute(output.steeringMmS) < CAR_LINE_STEERING_DEADBAND_MM_S)
             output.steeringMmS = 0.0f;
 
+        /* 转向速率限制：防止量化台阶导致猛打方向，过弯更柔和 */
+        {
+            float diff = output.steeringMmS - g_steeringApplied;
+            if (diff > (float) CAR_LINE_STEERING_SLEW_PER_5MS)
+                diff = (float) CAR_LINE_STEERING_SLEW_PER_5MS;
+            else if (diff < -(float) CAR_LINE_STEERING_SLEW_PER_5MS)
+                diff = -(float) CAR_LINE_STEERING_SLEW_PER_5MS;
+            output.steeringMmS = g_steeringApplied + diff;
+            g_steeringApplied = output.steeringMmS;
+        }
+
         /* 使用传入的可变基准速度代替原来的 CAR_BASE_SPEED_MM_S */
         slowdown = CAR_CURVE_SLOWDOWN_GAIN * absolute(line->position);
         output.forwardMmS = maximum(CAR_MIN_CURVE_SPEED_MM_S,
@@ -77,3 +91,6 @@ LineControl_Output LineControl_Update(const LineSensor_Data *line,
 }
 
 PID_Controller *LineControl_GetPID(void) { return &g_linePid; }
+
+/** @return 滤波后的循迹位置，供 FSM 使用，避免速度随原始位置噪声抖动。 */
+float LineControl_GetFilteredPosition(void) { return g_filtPosition; }

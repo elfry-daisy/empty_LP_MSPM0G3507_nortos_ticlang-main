@@ -112,8 +112,9 @@ void App_Car_ControlTask5ms(void)
 
         /* ==== FSM segment accel/decel ==== */
         {
-            const LineSensor_Data *ln = LineSensor_GetData();
-            float absPos = (ln->position > 0.0f) ? ln->position : -ln->position;
+            /* 使用滤波后位置，避免速度/状态随传感器量化噪声抖动 */
+            float filtPos = LineControl_GetFilteredPosition();
+            float absPos = (filtPos > 0.0f) ? filtPos : -filtPos;
             float distDelta = g_avgDistMm - g_prevDistMm;
             g_prevDistMm = g_avgDistMm;
 
@@ -166,8 +167,10 @@ void App_Car_ControlTask5ms(void)
 
             if (g_fsmSpeed < target)
                 accel = g_straightAccel;
-            else if (g_fsmState == FSM_CURVE || g_fsmState == FSM_PRE_BRAKE)
-                accel = -FSM_DEC_HARD;
+            else if (g_fsmState == FSM_PRE_BRAKE)
+                accel = -FSM_DEC_PRE_BRAKE;
+            else if (g_fsmState == FSM_CURVE)
+                accel = -FSM_DEC_CURVE;
             else
                 accel = -FSM_DEC_SMOOTH;
 

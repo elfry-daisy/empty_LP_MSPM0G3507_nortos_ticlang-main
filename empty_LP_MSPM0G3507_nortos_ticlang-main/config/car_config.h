@@ -22,7 +22,7 @@
 
 /* 电机限制。SLEW 表示每个 5 ms 控制周期最多变化多少千分比。 */
 #define CAR_MOTOR_DUTY_LIMIT_PERMILLE      (950)
-#define CAR_MOTOR_SLEW_PER_5MS             (40)
+#define CAR_MOTOR_SLEW_PER_5MS             (30)
 #define CAR_MOTOR_LEFT_POLARITY            (+1)
 #define CAR_MOTOR_RIGHT_POLARITY           (+1)
 #define CAR_MOTOR_DEADBAND_PERMILLE        (0)
@@ -75,10 +75,13 @@
 #define CAR_CURVE_SLOWDOWN_GAIN            (150.0f)
 
 /* 传感器位置低通滤波，0=不过滤 1=完全保持旧值 */
-#define CAR_LINE_POSITION_FILTER_ALPHA      (0.70f)
+#define CAR_LINE_POSITION_FILTER_ALPHA      (0.40f)
 
 /* 方向死区：|steering| 小于此值时置零，抑制直线微振 */
 #define CAR_LINE_STEERING_DEADBAND_MM_S     (10.0f)
+
+/* 转向速率限制：每个 5ms 周期 steering 最多变化多少 mm/s，抑制猛打方向 */
+#define CAR_LINE_STEERING_SLEW_PER_5MS      (15)
 
 /* FSM 分段加减速 */
 #define FSM_STRAIGHT_THRESHOLD             (0.08f)
@@ -88,6 +91,8 @@
 #define FSM_ACC_NORMAL                     (300.0f)
 #define FSM_DEC_SMOOTH                     (100.0f)
 #define FSM_DEC_HARD                       (400.0f)
+#define FSM_DEC_PRE_BRAKE                  (300.0f)
+#define FSM_DEC_CURVE                      (250.0f)
 #define FSM_SPEED_MIN                      (200.0f)
 #define FSM_SPEED_MAX                      (650.0f)
 #define FSM_SPEED_CURVE_MAX                (400.0f)
@@ -95,9 +100,9 @@
 
 /* 循迹方向环 PD（基于实车测试） */
 #define CAR_LINE_STEERING_POLARITY         (-1.0f)
-#define CAR_LINE_KP                        (1200.0f)
+#define CAR_LINE_KP                        (700.0f)
 #define CAR_LINE_KI                        (0.0f)
-#define CAR_LINE_KD                        (12.0f)
+#define CAR_LINE_KD                        (5.0f)
 #define CAR_LINE_STEERING_LIMIT_MM_S       (350.0f)
 
 /* 速度环 PI：KI 消稳态误差、KP 处理瞬态差速 */

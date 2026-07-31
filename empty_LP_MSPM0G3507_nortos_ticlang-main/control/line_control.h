@@ -31,4 +31,7 @@ LineControl_Output LineControl_Update(const LineSensor_Data *line,
 /** @return 方向 PID 指针，供在线调参使用；不要在 ISR 中修改。 */
 PID_Controller *LineControl_GetPID(void);
 
+/** @return 滤波后的循迹位置（约 -1.0~+1.0），供 FSM 等上层使用。 */
+float LineControl_GetFilteredPosition(void);
+
 #endif
