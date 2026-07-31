@@ -24,6 +24,7 @@
 /* ---- OLED ---- */
 #if CAR_OLED_SOFT_I2C_READY
 static bool g_oledOk;
+static uint8_t g_oledPage;
 
 static const char* task_name(Task_Mode t)
 {
@@ -72,13 +73,18 @@ static Btn g_b1, g_b2, g_b3;
 
 static bool btn_edge(Btn *bt, bool pressed, uint32_t now)
 {
-    if (pressed == bt->dn) { bt->db = DBNC; return false; }
+    if (pressed == bt->dn) {
+        /* 持续按住时随时检测长按；原逻辑只在状态变化的瞬间判断，
+         * 导致 PA27 长按停车标志永远不会置位。 */
+        if (pressed && !bt->ld && ((now - bt->ms) >= LONG_MS))
+            bt->ld = true;
+        bt->db = DBNC;
+        return false;
+    }
     if (bt->db > 0U)       { bt->db--;       return false; }
 
     bool up = !pressed && bt->dn;
     if (pressed && !bt->dn) { bt->ms = now; bt->ld = false; }
-    if (pressed && !bt->ld && ((now - bt->ms) >= LONG_MS))
-        bt->ld = true;
     bt->dn = pressed;
     return up;
 }
@@ -102,8 +108,8 @@ static void poll_buttons(void)
     if (up1 && can_start(s))
         App_Car_NextTask();
 
-    /* PA27 短按=启动 / 长按2秒=停车 */
-    if (up2 && can_start(s))
+    /* PA27 短按=启动 / 长按2秒=停车（长按停车后松手不触发启动） */
+    if (up2 && can_start(s) && !g_b2.ld)
         App_Car_Start();
     if (g_b2.ld && g_b2.dn && (s == CAR_STATE_RUNNING))
         App_Car_Stop();
@@ -206,11 +212,12 @@ void App_Debug_OLEDTask(void)
 {
 #if CAR_OLED_SOFT_I2C_READY
     if (!g_oledOk) return;
-    /* 运行中禁止刷屏：软件 I2C 全屏刷新约 40~50ms，会阻塞 200Hz 控制环，
-     * 导致小车失控、按键/蓝牙失灵。静止时刷新无影响。 */
+    /* 运行中禁止刷屏。静止时每次只刷一页（约 6ms），8 页一轮完整刷新，
+     * 避免软 I2C 全屏刷新（约 50ms）阻塞 5ms 控制环和按键/蓝牙轮询。 */
     if (App_Car_GetState() == CAR_STATE_RUNNING) return;
     render_oled();
-    OLED_Update();
+    OLED_UpdateArea(0, (int16_t)(g_oledPage * 8), 128, 8);
+    g_oledPage = (uint8_t)((g_oledPage + 1U) & 7U);
     g_oledOk = OLED_IsConnected();
 #endif
 }
