@@ -22,7 +22,7 @@
 
 /* 电机限制。SLEW 表示每个 5 ms 控制周期最多变化多少千分比。 */
 #define CAR_MOTOR_DUTY_LIMIT_PERMILLE      (950)
-#define CAR_MOTOR_SLEW_PER_5MS             (30)
+#define CAR_MOTOR_SLEW_PER_5MS             (35)
 #define CAR_MOTOR_LEFT_POLARITY            (+1)
 #define CAR_MOTOR_RIGHT_POLARITY           (+1)
 #define CAR_MOTOR_DEADBAND_PERMILLE        (0)
@@ -80,8 +80,12 @@
 /* 方向死区：|steering| 小于此值时置零，抑制直线微振 */
 #define CAR_LINE_STEERING_DEADBAND_MM_S     (10.0f)
 
-/* 转向速率限制：每个 5ms 周期 steering 最多变化多少 mm/s，抑制猛打方向 */
-#define CAR_LINE_STEERING_SLEW_PER_5MS      (15)
+/*
+ * 转向速率限制：每个 5ms 周期 steering 最大变化量（mm/s）。
+ * 基础项保证直道丝滑；增益项随 |位置误差| 增大而加大，保证弯道转向力度。
+ */
+#define CAR_LINE_STEERING_SLEW_BASE_PER_5MS (10)
+#define CAR_LINE_STEERING_SLEW_GAIN         (60.0f)
 
 /* FSM 分段加减速 */
 #define FSM_STRAIGHT_THRESHOLD             (0.08f)
@@ -100,10 +104,15 @@
 
 /* 循迹方向环 PD（基于实车测试） */
 #define CAR_LINE_STEERING_POLARITY         (-1.0f)
-#define CAR_LINE_KP                        (700.0f)
+#define CAR_LINE_KP                        (800.0f)
 #define CAR_LINE_KI                        (0.0f)
-#define CAR_LINE_KD                        (5.0f)
+#define CAR_LINE_KD                        (6.0f)
 #define CAR_LINE_STEERING_LIMIT_MM_S       (350.0f)
+
+/* 终点停车：编码器校准后按实际赛道调整；减速段保证停车平稳不甩球 */
+#define CAR_STOP_DISTANCE_MM               (6140U)
+#define CAR_STOP_DECEL_START_MM            (5340U)
+#define CAR_STOP_DECEL_MM_S2               (300.0f)
 
 /* 速度环 PI：KI 消稳态误差、KP 处理瞬态差速 */
 #define CAR_SPEED_LEFT_KP                  (1.5f)

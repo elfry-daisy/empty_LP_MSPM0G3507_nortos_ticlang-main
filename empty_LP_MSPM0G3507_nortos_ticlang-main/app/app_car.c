@@ -97,8 +97,8 @@ void App_Car_ControlTask5ms(void)
     g_avgDistMm = (left->distanceMm + right->distanceMm) * 0.5f;
 
     if (g_state == CAR_STATE_RUNNING) {
-        /* 里程停车：编码器半值，3000显示≈一圈物理 */
-        if (g_avgDistMm >= 5600.0f) {
+        /* 里程停车：距离阈值在 car_config.h，按实际编码器校准 */
+        if (g_avgDistMm >= (float)CAR_STOP_DISTANCE_MM) {
             Motor_SetStopMode(TB6612_STOP_BRAKE);
             Motor_Enable(false);
             SpeedControl_Reset();
@@ -153,9 +153,13 @@ void App_Car_ControlTask5ms(void)
                 }
             }
 
-            /* Speed integrator: straight cruise / pre-brake / curve target */
+            /* Speed integrator: straight cruise / pre-brake / curve / stop */
             float target, accel;
-            if (g_fsmState == FSM_CURVE) {
+            bool stopping = (g_avgDistMm >= (float)CAR_STOP_DECEL_START_MM);
+
+            if (stopping) {
+                target = 0.0f;   /* 终点前平滑减速停车 */
+            } else if (g_fsmState == FSM_CURVE) {
                 target = FSM_SPEED_CURVE_MAX - (absPos * FSM_CURVE_SLOWDOWN);
                 if (target < FSM_SPEED_MIN) target = FSM_SPEED_MIN;
                 if (target > FSM_SPEED_CURVE_MAX) target = FSM_SPEED_CURVE_MAX;
@@ -167,6 +171,8 @@ void App_Car_ControlTask5ms(void)
 
             if (g_fsmSpeed < target)
                 accel = g_straightAccel;
+            else if (stopping)
+                accel = -CAR_STOP_DECEL_MM_S2;
             else if (g_fsmState == FSM_PRE_BRAKE)
                 accel = -FSM_DEC_PRE_BRAKE;
             else if (g_fsmState == FSM_CURVE)
@@ -176,7 +182,9 @@ void App_Car_ControlTask5ms(void)
 
             g_fsmSpeed += accel * CAR_CONTROL_PERIOD_S;
             if (g_fsmSpeed > g_maxSpeed) g_fsmSpeed = g_maxSpeed;
-            if (g_fsmSpeed < FSM_SPEED_MIN) g_fsmSpeed = FSM_SPEED_MIN;
+            if (!stopping && g_fsmSpeed < FSM_SPEED_MIN)
+                g_fsmSpeed = FSM_SPEED_MIN;
+            if (g_fsmSpeed < 0.0f) g_fsmSpeed = 0.0f;
 
             lineOutput.forwardMmS = g_fsmSpeed;
         }

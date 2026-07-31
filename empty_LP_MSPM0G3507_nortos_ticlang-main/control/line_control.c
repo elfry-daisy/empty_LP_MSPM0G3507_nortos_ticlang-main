@@ -60,13 +60,14 @@ LineControl_Output LineControl_Update(const LineSensor_Data *line,
         if (absolute(output.steeringMmS) < CAR_LINE_STEERING_DEADBAND_MM_S)
             output.steeringMmS = 0.0f;
 
-        /* 转向速率限制：防止量化台阶导致猛打方向，过弯更柔和 */
+        /* 转向速率限制：小误差时慢修（丝滑），大误差时快跟（弯道力度） */
         {
+            float slewLimit = (float) CAR_LINE_STEERING_SLEW_BASE_PER_5MS +
+                              CAR_LINE_STEERING_SLEW_GAIN *
+                              absolute(g_filtPosition);
             float diff = output.steeringMmS - g_steeringApplied;
-            if (diff > (float) CAR_LINE_STEERING_SLEW_PER_5MS)
-                diff = (float) CAR_LINE_STEERING_SLEW_PER_5MS;
-            else if (diff < -(float) CAR_LINE_STEERING_SLEW_PER_5MS)
-                diff = -(float) CAR_LINE_STEERING_SLEW_PER_5MS;
+            if (diff > slewLimit) diff = slewLimit;
+            else if (diff < -slewLimit) diff = -slewLimit;
             output.steeringMmS = g_steeringApplied + diff;
             g_steeringApplied = output.steeringMmS;
         }

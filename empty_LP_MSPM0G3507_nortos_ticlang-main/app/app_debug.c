@@ -206,6 +206,9 @@ void App_Debug_OLEDTask(void)
 {
 #if CAR_OLED_SOFT_I2C_READY
     if (!g_oledOk) return;
+    /* 运行中禁止刷屏：软件 I2C 全屏刷新约 40~50ms，会阻塞 200Hz 控制环，
+     * 导致小车失控、按键/蓝牙失灵。静止时刷新无影响。 */
+    if (App_Car_GetState() == CAR_STATE_RUNNING) return;
     render_oled();
     OLED_Update();
     g_oledOk = OLED_IsConnected();
