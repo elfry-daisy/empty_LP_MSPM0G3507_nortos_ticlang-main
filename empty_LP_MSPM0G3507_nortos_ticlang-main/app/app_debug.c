@@ -62,29 +62,24 @@ static void render_oled(void)
 
 /* ---- 三按键 ---- */
 #define B1_PIN  DL_GPIO_PIN_26   /* PA26: 切任务 */
-#define B2_PIN  DL_GPIO_PIN_27   /* PA27: 启动/停车 */
+#define B2_PIN  DL_GPIO_PIN_27   /* PA27: 启动 */
 #define B3_PIN  DL_GPIO_PIN_14   /* PA14: 标定 */
-#define LONG_MS 2000U
 #define DBNC    3U
 
-typedef struct { uint32_t ms; bool dn, ld; uint8_t db; } Btn;
+typedef struct { bool dn; uint8_t db; } Btn;
 
 static Btn g_b1, g_b2, g_b3;
 
 static bool btn_edge(Btn *bt, bool pressed, uint32_t now)
 {
+    (void)now;
     if (pressed == bt->dn) {
-        /* 持续按住时随时检测长按；原逻辑只在状态变化的瞬间判断，
-         * 导致 PA27 长按停车标志永远不会置位。 */
-        if (pressed && !bt->ld && ((now - bt->ms) >= LONG_MS))
-            bt->ld = true;
         bt->db = DBNC;
         return false;
     }
-    if (bt->db > 0U)       { bt->db--;       return false; }
+    if (bt->db > 0U) { bt->db--; return false; }
 
     bool up = !pressed && bt->dn;
-    if (pressed && !bt->dn) { bt->ms = now; bt->ld = false; }
     bt->dn = pressed;
     return up;
 }
@@ -108,11 +103,9 @@ static void poll_buttons(void)
     if (up1 && can_start(s))
         App_Car_NextTask();
 
-    /* PA27 短按=启动 / 长按2秒=停车（长按停车后松手不触发启动） */
-    if (up2 && can_start(s) && !g_b2.ld)
+    /* PA27 短按=启动（无长按停车功能） */
+    if (up2 && can_start(s))
         App_Car_Start();
-    if (g_b2.ld && g_b2.dn && (s == CAR_STATE_RUNNING))
-        App_Car_Stop();
 
     /* PA14 短按=标定切换 */
     if (up3) {
@@ -125,6 +118,12 @@ static void poll_buttons(void)
 void App_Debug_Init(void)
 {
     BSP_UART_Init();
+    /* 按键输入初始化：内部上拉，避免悬空电平抖动导致按键失灵 */
+    DL_GPIO_initDigitalInputFeatures(GPIOA,
+        B1_PIN | B2_PIN | B3_PIN,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_enableInput(GPIOA, B1_PIN | B2_PIN | B3_PIN);
 #if CAR_OLED_SOFT_I2C_READY
     OLED_Init();
     g_oledOk = OLED_IsConnected();
@@ -140,6 +139,7 @@ void App_Debug_PollCommands(void)
     poll_buttons();
     while (BSP_UART_TryReadByte(&c)) {
         PID_Controller *pid = LineControl_GetPID();
+        (void)BSP_UART_TryWriteByte(c);   /* echo: verify bluetooth link */
         switch (c) {
         case 'r': case 'R': App_Car_Start(); break;
         case 's': case 'S': App_Car_Stop(); break;
@@ -211,13 +211,27 @@ void App_Debug_Task(void)
 void App_Debug_OLEDTask(void)
 {
 #if CAR_OLED_SOFT_I2C_READY
-    if (!g_oledOk) return;
-    /* 运行中禁止刷屏。静止时每次只刷一页（约 6ms），8 页一轮完整刷新，
-     * 避免软 I2C 全屏刷新（约 50ms）阻塞 5ms 控制环和按键/蓝牙轮询。 */
-    if (App_Car_GetState() == CAR_STATE_RUNNING) return;
+    static uint32_t retryMs;
+    uint32_t now = BSP_Time_GetMs();
+
+    /* OLED 上电时序较慢时，每 1s 重试初始化直到就绪 */
+    if (!g_oledOk) {
+        if ((uint32_t)(now - retryMs) < 1000U) return;
+        retryMs = now;
+        OLED_Init();
+        g_oledOk = OLED_IsConnected();
+        if (!g_oledOk) return;
+    }
+
+    /* 每次只上传一行（约 6ms），避免整屏刷新（约 50ms）阻塞 5ms 控制环。
+     * 运行中轮换关键四行，实现实时显示；静止时刷满 8 页。 */
     render_oled();
     OLED_UpdateArea(0, (int16_t)(g_oledPage * 8), 128, 8);
-    g_oledPage = (uint8_t)((g_oledPage + 1U) & 7U);
+    {
+        /* 运行中轮换前 6 页（任务/时间/Acc/Max/速度/距离），静止时刷满 8 页 */
+        uint8_t pageCount = (App_Car_GetState() == CAR_STATE_RUNNING) ? 6U : 8U;
+        g_oledPage = (uint8_t)((g_oledPage + 1U) % pageCount);
+    }
     g_oledOk = OLED_IsConnected();
 #endif
 }

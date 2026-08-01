@@ -116,12 +116,6 @@
 #define CAR_STOP_DECEL_MM_S2               (450.0f)
 #define CAR_STOP_SPEED_MM_S                (20.0f)
 #define CAR_STOP_CRAWL_MM_S                (60.0f)
-#define CAR_STOP_OVERSHOOT_MM              (300U)
-
-/* A 点起终点横杠检测：连续多少周期确认压杠（200Hz，5=25ms） */
-#define CAR_BAR_DEBOUNCE_CYCLES            (5U)
-#define CAR_BAR_START_WINDOW_MM            (1500U)
-#define CAR_BAR_ARM_MM                     (1500U)
 
 /* 速度环 PI：KI 消稳态误差、KP 处理瞬态差速 */
 #define CAR_SPEED_LEFT_KP                  (1.5f)

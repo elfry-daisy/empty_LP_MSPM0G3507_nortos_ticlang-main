@@ -36,12 +36,6 @@ typedef enum { FSM_STRAIGHT, FSM_PRE_BRAKE, FSM_CURVE } FSM_State;
 static FSM_State  g_fsmState = FSM_STRAIGHT;
 static uint16_t   g_curveHoldCnt;
 
-/* A-point bar stop: 1st bar = distance reference, 2nd bar = precise stop */
-static bool     g_barBaseValid;
-static float    g_barBaseMm;
-static uint8_t  g_barCount;
-static uint16_t g_barDebounce;
-
 /* 任务速度剖面：直道巡航 / 弯道上限 / 停车距离(mm)。
  * 时间目标：T2 ≤20s→约17s，T4 A→B ≤8s→约7s，T5/T6 ≤30s→约28s。 */
 typedef struct {
@@ -132,46 +126,15 @@ void App_Car_ControlTask5ms(void)
     g_avgDistMm = (left->distanceMm + right->distanceMm) * 0.5f;
 
     if (g_state == CAR_STATE_RUNNING) {
-        const float baseMm     = g_barBaseValid ? g_barBaseMm : 0.0f;
-        const float targetStop = baseMm + (float)g_stopDistMm;
-
-        /* A-point bar: 1st bar = start reference, 2nd bar = precise stop */
-        {
-            const LineSensor_Data *ln = LineSensor_GetData();
-            if (ln->junction) {
-                if (g_barDebounce < CAR_BAR_DEBOUNCE_CYCLES)
-                    g_barDebounce++;
-                if (g_barDebounce == CAR_BAR_DEBOUNCE_CYCLES) {
-                    g_barDebounce = (uint16_t)0xFFFFU; /* once per bar */
-                    if ((g_barCount == 0U) &&
-                        (g_avgDistMm <= (float)CAR_BAR_START_WINDOW_MM)) {
-                        g_barBaseMm    = g_avgDistMm;
-                        g_barBaseValid = true;
-                        g_barCount     = 1U;
-                    } else if ((g_barCount == 1U) &&
-                               (g_avgDistMm >=
-                                (targetStop - (float)CAR_BAR_ARM_MM))) {
-                        g_barCount = 2U;
-                    }
-                }
-            } else {
-                g_barDebounce = 0U;
-            }
-        }
-
-        /* Stop on 2nd bar (physical reference) or distance fallback */
-        {
-            const bool stopNow =
-                (g_barCount >= 2U) ||
-                (g_avgDistMm >= (targetStop + (float)CAR_STOP_OVERSHOOT_MM));
-            if (stopNow) {
-                Motor_SetStopMode(TB6612_STOP_BRAKE);
-                Motor_Enable(false);
-                SpeedControl_Reset();
-                g_stopTimeMs = BSP_Time_GetMs();
-                g_state = CAR_STATE_STOPPED;
-                return;
-            }
+        /* Mileage stop: precise stop at the task stop distance */
+        const float targetStop = (float)g_stopDistMm;
+        if (g_avgDistMm >= targetStop) {
+            Motor_SetStopMode(TB6612_STOP_BRAKE);
+            Motor_Enable(false);
+            SpeedControl_Reset();
+            g_stopTimeMs = BSP_Time_GetMs();
+            g_state = CAR_STATE_STOPPED;
+            return;
         }
 
         lineOutput = LineControl_Update(LineSensor_GetData(),
@@ -222,7 +185,7 @@ void App_Car_ControlTask5ms(void)
 
             /* Speed integrator: straight cruise / pre-brake / curve / stop.
              * Stop zone is adaptive: brake from v^2/(2a)+margin, then crawl
-             * at low speed until the 2nd bar is hit. */
+             * at low speed until the mileage stop distance is reached. */
             float target, accel;
             const float crawlMmS   = (float)CAR_STOP_CRAWL_MM_S;
             const float distToStop = targetStop - g_avgDistMm;
@@ -301,10 +264,6 @@ void App_Car_Start(void)
     Encoder_Reset();
     g_avgDistMm = 0.0f;
     g_prevDistMm = 0.0f;
-    g_barBaseValid = false;
-    g_barBaseMm    = 0.0f;
-    g_barCount     = 0U;
-    g_barDebounce  = 0U;
     g_fsmSpeed = 350.0f;
     g_fsmDist = 0.0f;
     g_fsmState = FSM_STRAIGHT;
