@@ -16,10 +16,10 @@ void SpeedControl_Init(void)
 {
     /* 左右增益分开配置，方便补偿电机、减速箱和负载差异。 */
     PID_Init(&g_leftPid, CAR_SPEED_LEFT_KP, CAR_SPEED_LEFT_KI,
-             CAR_SPEED_LEFT_KD, -CAR_MOTOR_BRAKE_DUTY_PERMILLE,
+             CAR_SPEED_LEFT_KD, 100,
              CAR_MOTOR_DUTY_LIMIT_PERMILLE);
     PID_Init(&g_rightPid, CAR_SPEED_RIGHT_KP, CAR_SPEED_RIGHT_KI,
-             CAR_SPEED_RIGHT_KD, -CAR_MOTOR_BRAKE_DUTY_PERMILLE,
+             CAR_SPEED_RIGHT_KD, 100,
              CAR_MOTOR_DUTY_LIMIT_PERMILLE);
     SpeedControl_Reset();
 }

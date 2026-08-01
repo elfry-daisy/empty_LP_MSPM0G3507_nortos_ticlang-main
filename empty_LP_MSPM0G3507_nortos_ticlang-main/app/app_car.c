@@ -30,35 +30,9 @@ static float      g_fsmSpeed = 350.0f;
 static float      g_fsmDist;
 static float      g_straightAccel = FSM_ACC_NORMAL;
 static float      g_maxSpeed      = FSM_SPEED_MAX;
-static float      g_curveMaxSpeed = FSM_SPEED_CURVE_MAX;
-static uint32_t   g_stopDistMm    = CAR_STOP_DISTANCE_MM;
 typedef enum { FSM_STRAIGHT, FSM_PRE_BRAKE, FSM_CURVE } FSM_State;
 static FSM_State  g_fsmState = FSM_STRAIGHT;
 static uint16_t   g_curveHoldCnt;
-
-/* 任务速度剖面：直道巡航 / 弯道上限 / 停车距离(mm)。
- * 时间目标：T2 ≤20s→约17s，T4 A→B ≤8s→约7s，T5/T6 ≤30s→约28s。 */
-typedef struct {
-    float    straightMmS;
-    float    curveMmS;
-    uint32_t stopDistMm;
-} Task_Profile;
-
-static const Task_Profile g_taskProfiles[TASK_COUNT] = {
-    /* TASK_NONE */           { 300.0f, 220.0f, 6140U },
-    /* TASK_2_LAP_FAST */     { 500.0f, 300.0f, 6140U },
-    /* TASK_4_AB_BALL */      { 350.0f, 250.0f, CAR_AB_DISTANCE_MM },
-    /* TASK_5_LAP_BALL */     { 280.0f, 210.0f, 6140U },
-    /* TASK_6_LAP_BALL_POS */ { 280.0f, 210.0f, 6140U },
-};
-
-static void apply_task_profile(Task_Mode t)
-{
-    const Task_Profile *p = &g_taskProfiles[t];
-    g_maxSpeed      = p->straightMmS;
-    g_curveMaxSpeed = p->curveMmS;
-    g_stopDistMm    = p->stopDistMm;
-}
 
 static float task_default_speed(Task_Mode t)
 {
@@ -76,7 +50,6 @@ void App_Car_NextTask(void)
     g_task = (Task_Mode)((uint8_t)g_task + 1U);
     if (g_task >= TASK_COUNT) g_task = (Task_Mode)1U;
     g_taskSpeed = task_default_speed(g_task);
-    apply_task_profile(g_task);
 }
 
 Task_Mode App_Car_GetTask(void) { return g_task; }
@@ -85,7 +58,6 @@ void App_Car_SetTask(Task_Mode t)
 {
     g_task = t;
     g_taskSpeed = task_default_speed(t);
-    apply_task_profile(t);
 }
 
 void App_Car_Init(void)
@@ -101,7 +73,6 @@ void App_Car_Init(void)
     g_lastLineSeenMs = BSP_Time_GetMs();
     g_task   = TASK_2_LAP_FAST;
     g_taskSpeed = task_default_speed(g_task);
-    apply_task_profile(g_task);
     g_state  = CAR_STATE_IDLE;
     g_avgDistMm = 0.0f;
 }
@@ -126,9 +97,8 @@ void App_Car_ControlTask5ms(void)
     g_avgDistMm = (left->distanceMm + right->distanceMm) * 0.5f;
 
     if (g_state == CAR_STATE_RUNNING) {
-        /* Mileage stop: precise stop at the task stop distance */
-        const float targetStop = (float)g_stopDistMm;
-        if (g_avgDistMm >= targetStop) {
+        /* 里程停车：距离阈值在 car_config.h，按实际编码器校准 */
+        if (g_avgDistMm >= (float)CAR_STOP_DISTANCE_MM) {
             Motor_SetStopMode(TB6612_STOP_BRAKE);
             Motor_Enable(false);
             SpeedControl_Reset();
@@ -183,45 +153,36 @@ void App_Car_ControlTask5ms(void)
                 }
             }
 
-            /* Speed integrator: straight cruise / pre-brake / curve / stop.
-             * Stop zone is adaptive: brake from v^2/(2a)+margin, then crawl
-             * at low speed until the mileage stop distance is reached. */
+            /* Speed integrator: straight cruise / pre-brake / curve / stop */
             float target, accel;
-            const float crawlMmS   = (float)CAR_STOP_CRAWL_MM_S;
-            const float distToStop = targetStop - g_avgDistMm;
-            const float brakeDist  = ((g_fsmSpeed * g_fsmSpeed) /
-                                      (2.0f * CAR_STOP_DECEL_MM_S2)) +
-                                     (float)CAR_STOP_DECEL_MARGIN_MM + 60.0f;
-            bool stopping = (distToStop <= brakeDist);
+            bool stopping = (g_avgDistMm >= (float)CAR_STOP_DECEL_START_MM);
 
             if (stopping) {
-                target = crawlMmS;
-                accel  = (g_fsmSpeed > crawlMmS) ?
-                         -CAR_STOP_DECEL_MM_S2 : 0.0f;
+                target = 0.0f;   /* 终点前平滑减速停车 */
             } else if (g_fsmState == FSM_CURVE) {
-                target = g_curveMaxSpeed - (absPos * FSM_CURVE_SLOWDOWN);
+                target = FSM_SPEED_CURVE_MAX - (absPos * FSM_CURVE_SLOWDOWN);
                 if (target < FSM_SPEED_MIN) target = FSM_SPEED_MIN;
-                if (target > g_curveMaxSpeed) target = g_curveMaxSpeed;
+                if (target > FSM_SPEED_CURVE_MAX) target = FSM_SPEED_CURVE_MAX;
             } else if (g_fsmState == FSM_PRE_BRAKE) {
-                target = g_curveMaxSpeed;  /* slow down before the curve */
+                target = FSM_SPEED_CURVE_MAX;  /* slow down before the curve */
             } else {
                 target = g_maxSpeed;
             }
 
-            if (!stopping && (g_fsmSpeed < target))
+            if (g_fsmSpeed < target)
                 accel = g_straightAccel;
-            else if (!stopping && (g_fsmState == FSM_PRE_BRAKE))
+            else if (stopping)
+                accel = -CAR_STOP_DECEL_MM_S2;
+            else if (g_fsmState == FSM_PRE_BRAKE)
                 accel = -FSM_DEC_PRE_BRAKE;
-            else if (!stopping && (g_fsmState == FSM_CURVE))
+            else if (g_fsmState == FSM_CURVE)
                 accel = -FSM_DEC_CURVE;
-            else if (!stopping)
+            else
                 accel = -FSM_DEC_SMOOTH;
 
             g_fsmSpeed += accel * CAR_CONTROL_PERIOD_S;
             if (g_fsmSpeed > g_maxSpeed) g_fsmSpeed = g_maxSpeed;
-            if (stopping && (g_fsmSpeed < crawlMmS))
-                g_fsmSpeed = crawlMmS;
-            else if (!stopping && (g_fsmSpeed < FSM_SPEED_MIN))
+            if (!stopping && g_fsmSpeed < FSM_SPEED_MIN)
                 g_fsmSpeed = FSM_SPEED_MIN;
             if (g_fsmSpeed < 0.0f) g_fsmSpeed = 0.0f;
 

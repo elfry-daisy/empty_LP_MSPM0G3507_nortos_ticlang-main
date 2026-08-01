@@ -22,7 +22,6 @@
 
 /* 电机限制。SLEW 表示每个 5 ms 控制周期最多变化多少千分比。 */
 #define CAR_MOTOR_DUTY_LIMIT_PERMILLE      (950)
-#define CAR_MOTOR_BRAKE_DUTY_PERMILLE      (100)
 #define CAR_MOTOR_SLEW_PER_5MS             (35)
 #define CAR_MOTOR_LEFT_POLARITY            (+1)
 #define CAR_MOTOR_RIGHT_POLARITY           (+1)
@@ -112,10 +111,8 @@
 
 /* 终点停车：编码器校准后按实际赛道调整；减速段保证停车平稳不甩球 */
 #define CAR_STOP_DISTANCE_MM               (6140U)
-#define CAR_STOP_DECEL_MARGIN_MM           (30U)
-#define CAR_STOP_DECEL_MM_S2               (450.0f)
-#define CAR_STOP_SPEED_MM_S                (20.0f)
-#define CAR_STOP_CRAWL_MM_S                (60.0f)
+#define CAR_STOP_DECEL_START_MM            (5340U)
+#define CAR_STOP_DECEL_MM_S2               (300.0f)
 
 /* 速度环 PI：KI 消稳态误差、KP 处理瞬态差速 */
 #define CAR_SPEED_LEFT_KP                  (1.5f)
