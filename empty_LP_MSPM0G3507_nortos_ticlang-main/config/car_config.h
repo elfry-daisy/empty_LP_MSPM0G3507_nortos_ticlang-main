@@ -57,7 +57,10 @@
 /* 八路真实模拟循迹阵列；公开数组始终按车辆物理最左侧到最右侧排列。 */
 #define CAR_LINE_SENSOR_COUNT              (8U)
 #define CAR_LINE_ACTIVE_DARK               (1U)
-#define CAR_LINE_BLACK_IS_LOW_RAW          (1U)
+/* 实测硬件：黑线 ADC 原始值比白底高（反相接法），BLACK_IS_LOW_RAW=0
+ * 使 normalize() 不翻转，黑线直接归一化为 1000。若换传感器后实测黑白
+ * 原始值反了，把本项改回 (1U) 即可。 */
+#define CAR_LINE_BLACK_IS_LOW_RAW          (0U)
 #define CAR_LINE_ADC0_CHANNEL_COUNT        (3U)
 #define CAR_LINE_ADC1_CHANNEL_COUNT        (5U)
 #define CAR_LINE_ADC_MAX_VALUE             (4095U)
@@ -65,8 +68,9 @@
 #define CAR_LINE_ADC_REVERSE_ORDER         (0U)
 #define CAR_LINE_DETECT_SUM_MIN            (600U)
 #define CAR_LINE_ELEMENT_THRESHOLD         (650U)
+#define CAR_LINE_CAL_MIN_SPAN              (150U)
 #define CAR_LINE_LOST_STOP_MS              (1000U)
-#define CAR_LINE_LOST_STEER_HOLD_CYCLES    (30U)
+#define CAR_LINE_LOST_STEER_HOLD_CYCLES    (50U)
 
 /* 方向环生成速度差；速度目标必须≤电机实际可达值（编码器半值，实际约350） */
 #define CAR_BASE_SPEED_MM_S                (500.0f)
@@ -85,11 +89,13 @@
  * 基础项保证直道丝滑；增益项随 |位置误差| 增大而加大，保证弯道转向力度。
  */
 #define CAR_LINE_STEERING_SLEW_BASE_PER_5MS (10)
-#define CAR_LINE_STEERING_SLEW_GAIN         (60.0f)
+#define CAR_LINE_STEERING_SLEW_GAIN         (20.0f)
 
 /* FSM 分段加减速 */
-#define FSM_STRAIGHT_THRESHOLD             (0.08f)
-#define FSM_CURVE_THRESHOLD                (0.20f)
+/* 位置已恢复物理量纲（最大约 ±1.0），阈值从旧的 0.08/0.20 按比例换算：
+ * 直道带宽约 2 个传感器间距，弯道判据约 2.5 个传感器间距。 */
+#define FSM_STRAIGHT_THRESHOLD             (0.56f)
+#define FSM_CURVE_THRESHOLD                (0.70f)
 #define FSM_PRE_BRAKE_DIST_MM              (1000U)
 #define FSM_CURVE_EXIT_CYCLES              (20U)
 #define FSM_ACC_NORMAL                     (300.0f)
@@ -103,10 +109,14 @@
 #define FSM_CURVE_SLOWDOWN                 (500.0f)
 
 /* 循迹方向环 PD（基于实车测试） */
-#define CAR_LINE_STEERING_POLARITY         (-1.0f)
+/* 方向极性已随黑白反相修复从 -1 改回 +1，两者抵消后直道方向与之前一致。
+ * 现场验证：架空车轮按 B2 出发，黑线偏左时车轮应向左打；若打反，把此项
+ * 改回 -1.0f 即可。 */
+#define CAR_LINE_STEERING_POLARITY         (+1.0f)
 #define CAR_LINE_KP                        (800.0f)
 #define CAR_LINE_KI                        (0.0f)
-#define CAR_LINE_KD                        (6.0f)
+/* 位置量纲恢复后微分按比例缩小，避免直线抖动。 */
+#define CAR_LINE_KD                        (1.0f)
 #define CAR_LINE_STEERING_LIMIT_MM_S       (350.0f)
 
 /* 终点停车：编码器校准后按实际赛道调整；减速段保证停车平稳不甩球 */
@@ -150,7 +160,7 @@
 /* 各任务速度档位（蓝牙v/V可在静止时调整当前任务的默认值） */
 #define TASK2_BASE_SPEED_MM_S              (700.0f)
 #define TASK4_BASE_SPEED_MM_S              (400.0f)
-#define TASK5_BASE_SPEED_MM_S              (350.0f)
+#define TASK5_BASE_SPEED_MM_S              (300.0f)
 #define TASK6_BASE_SPEED_MM_S              (350.0f)
 
 #endif /* CAR_CONFIG_H */

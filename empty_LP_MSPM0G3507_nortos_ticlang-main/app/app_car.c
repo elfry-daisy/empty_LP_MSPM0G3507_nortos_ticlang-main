@@ -24,6 +24,8 @@ static uint32_t   g_startTimeMs;
 static uint32_t   g_stopTimeMs;
 static float      g_avgDistMm;
 static float      g_prevDistMm;
+static uint32_t    g_stopDistMm;
+static uint32_t    g_decelStartMm;
 
 /* FSM */
 static float      g_fsmSpeed = 350.0f;
@@ -45,11 +47,27 @@ static float task_default_speed(Task_Mode t)
     }
 }
 
+static uint32_t task_stop_dist(Task_Mode t)
+{
+    if (t == TASK_4_AB_BALL) return CAR_AB_DISTANCE_MM;
+    return CAR_LAP_DISTANCE_MM;
+}
+
+/* 按任务速度计算提前减速点：保证以当前速度也能在终点前平稳停住。 */
+static void update_stop_plan(void)
+{
+    uint32_t need = (uint32_t)((g_taskSpeed * g_taskSpeed) /
+                               (2.0f * CAR_STOP_DECEL_MM_S2)) + 100U;
+    g_stopDistMm   = task_stop_dist(g_task);
+    g_decelStartMm = (need >= g_stopDistMm) ? 0U : (g_stopDistMm - need);
+}
+
 void App_Car_NextTask(void)
 {
     g_task = (Task_Mode)((uint8_t)g_task + 1U);
     if (g_task >= TASK_COUNT) g_task = (Task_Mode)1U;
     g_taskSpeed = task_default_speed(g_task);
+    update_stop_plan();
 }
 
 Task_Mode App_Car_GetTask(void) { return g_task; }
@@ -58,6 +76,7 @@ void App_Car_SetTask(Task_Mode t)
 {
     g_task = t;
     g_taskSpeed = task_default_speed(t);
+    update_stop_plan();
 }
 
 void App_Car_Init(void)
@@ -73,6 +92,7 @@ void App_Car_Init(void)
     g_lastLineSeenMs = BSP_Time_GetMs();
     g_task   = TASK_2_LAP_FAST;
     g_taskSpeed = task_default_speed(g_task);
+    update_stop_plan();
     g_state  = CAR_STATE_IDLE;
     g_avgDistMm = 0.0f;
 }
@@ -98,7 +118,7 @@ void App_Car_ControlTask5ms(void)
 
     if (g_state == CAR_STATE_RUNNING) {
         /* 里程停车：距离阈值在 car_config.h，按实际编码器校准 */
-        if (g_avgDistMm >= (float)CAR_STOP_DISTANCE_MM) {
+        if (g_avgDistMm >= (float)g_stopDistMm) {
             Motor_SetStopMode(TB6612_STOP_BRAKE);
             Motor_Enable(false);
             SpeedControl_Reset();
@@ -154,19 +174,24 @@ void App_Car_ControlTask5ms(void)
             }
 
             /* Speed integrator: straight cruise / pre-brake / curve / stop */
-            float target, accel;
-            bool stopping = (g_avgDistMm >= (float)CAR_STOP_DECEL_START_MM);
+            float target, accel, curveBase;
+            bool stopping = (g_avgDistMm >= (float)g_decelStartMm);
+
+            /* 弯道基准速度随任务速度缩放，保证不同任务在弯道也有明显速度差。 */
+            curveBase = (g_taskSpeed * 0.8f < FSM_SPEED_CURVE_MAX) ?
+                        (g_taskSpeed * 0.8f) : FSM_SPEED_CURVE_MAX;
 
             if (stopping) {
                 target = 0.0f;   /* 终点前平滑减速停车 */
             } else if (g_fsmState == FSM_CURVE) {
-                target = FSM_SPEED_CURVE_MAX - (absPos * FSM_CURVE_SLOWDOWN);
+                target = curveBase - (absPos * FSM_CURVE_SLOWDOWN);
                 if (target < FSM_SPEED_MIN) target = FSM_SPEED_MIN;
-                if (target > FSM_SPEED_CURVE_MAX) target = FSM_SPEED_CURVE_MAX;
+                if (target > curveBase) target = curveBase;
             } else if (g_fsmState == FSM_PRE_BRAKE) {
-                target = FSM_SPEED_CURVE_MAX;  /* slow down before the curve */
+                target = curveBase;  /* slow down before the curve */
             } else {
-                target = g_maxSpeed;
+                target = g_taskSpeed;
+                if (target > g_maxSpeed) target = g_maxSpeed;
             }
 
             if (g_fsmSpeed < target)
@@ -222,10 +247,11 @@ void App_Car_Start(void)
 {
     if ((g_state == CAR_STATE_FAULT) || LineSensor_IsCalibrating()) return;
 
+    update_stop_plan();
     Encoder_Reset();
     g_avgDistMm = 0.0f;
     g_prevDistMm = 0.0f;
-    g_fsmSpeed = 350.0f;
+    g_fsmSpeed = (g_taskSpeed < 350.0f) ? g_taskSpeed : 350.0f;
     g_fsmDist = 0.0f;
     g_fsmState = FSM_STRAIGHT;
     g_curveHoldCnt = 0U;
@@ -280,7 +306,7 @@ uint32_t App_Car_GetElapsedMs(void)
 }
 
 float App_Car_GetTraveledMm(void) { return g_avgDistMm; }
-uint32_t App_Car_GetTargetMm(void) { return CAR_LAP_DISTANCE_MM; }
+uint32_t App_Car_GetTargetMm(void) { return g_stopDistMm; }
 void App_Car_SetSpeed(float s) { g_taskSpeed = s; }
 float App_Car_GetSpeed(void) { return g_taskSpeed; }
 void App_Car_SetStraightAccel(float a) { g_straightAccel = a; }

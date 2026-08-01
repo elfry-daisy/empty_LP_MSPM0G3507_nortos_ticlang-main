@@ -12,6 +12,7 @@ static LineSensor_Data g_data;
 static uint16_t g_minimum[CAR_LINE_SENSOR_COUNT];
 static uint16_t g_maximum[CAR_LINE_SENSOR_COUNT];
 static bool g_calibrating;
+static bool g_calibrated;
 static float g_lastPosition;
 
 static uint16_t normalize(uint16_t raw, uint16_t minimum, uint16_t maximum)
@@ -38,6 +39,7 @@ void LineSensor_Init(void)
     BSP_LineADC_Init();
     g_data = (LineSensor_Data) {0};
     g_calibrating = false;
+    g_calibrated = false;
     g_lastPosition = 0.0f;
     for (index = 0U; index < CAR_LINE_SENSOR_COUNT; ++index) {
         /* 未标定前使用 12 位满量程；实际使用前仍建议执行一次动态黑白标定。 */
@@ -98,6 +100,7 @@ void LineSensor_StartCalibration(void)
         g_maximum[index] = 0U;
     }
     g_calibrating = true;
+    g_calibrated = false;
 }
 
 void LineSensor_UpdateCalibration(void)
@@ -110,6 +113,23 @@ void LineSensor_UpdateCalibration(void)
     }
 }
 
-void LineSensor_FinishCalibration(void) { g_calibrating = false; }
+void LineSensor_FinishCalibration(void)
+{
+    g_calibrating = false;
+    g_calibrated = (LineSensor_GetCalOkCount() == CAR_LINE_SENSOR_COUNT);
+}
 bool LineSensor_IsCalibrating(void) { return g_calibrating; }
+bool LineSensor_IsCalibrated(void) { return g_calibrated; }
+uint8_t LineSensor_GetCalOkCount(void)
+{
+    uint8_t ok = 0U;
+    uint32_t index;
+    for (index = 0U; index < CAR_LINE_SENSOR_COUNT; ++index) {
+        if ((uint32_t)(g_maximum[index] - g_minimum[index]) >=
+            (uint32_t)CAR_LINE_CAL_MIN_SPAN) {
+            ok++;
+        }
+    }
+    return ok;
+}
 const LineSensor_Data *LineSensor_GetData(void) { return &g_data; }

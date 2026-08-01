@@ -36,26 +36,53 @@ static const char* task_name(Task_Mode t)
     }
 }
 
+static const char* state_name(Car_State s)
+{
+    switch (s) {
+    case CAR_STATE_RUNNING:     return "RUN";
+    case CAR_STATE_STOPPED:     return "DONE";
+    case CAR_STATE_LINE_LOST:   return "LOST";
+    case CAR_STATE_CALIBRATING: return "CAL";
+    case CAR_STATE_FAULT:       return "FAULT";
+    default:                    return "IDLE";
+    }
+}
+
 static void render_oled(void)
 {
     uint32_t elapsed = App_Car_GetElapsedMs();
     float dist       = App_Car_GetTraveledMm();
     Car_State s      = App_Car_GetState();
-    float spd        = App_Car_GetSpeed();
+    const Encoder_Data *le = Encoder_GetLeft();
+    const Encoder_Data *re = Encoder_GetRight();
+    float spd        = (le->speedMmS + re->speedMmS) * 0.5f;
 
     OLED_Clear();
-    OLED_Printf(0,  0, OLED_6X8, "%s", task_name(App_Car_GetTask()));
-    OLED_Printf(0, 16, OLED_6X8, "T:%2lu.%02lu  %s",
-        (unsigned long)(elapsed/1000U), (unsigned int)((elapsed%1000U)/10U),
-        (s==CAR_STATE_RUNNING?"RUN":s==CAR_STATE_STOPPED?"DONE":
-         s==CAR_STATE_LINE_LOST?"LOST":s==CAR_STATE_CALIBRATING?"CAL":"IDLE"));
+
+    if (s == CAR_STATE_CALIBRATING) {
+        OLED_Printf(0,  0, OLED_6X8, "== CAL SWEEP ==");
+        OLED_Printf(0,  8, OLED_6X8, "OK:%lu/%lu  B3=done",
+            (unsigned long)LineSensor_GetCalOkCount(),
+            (unsigned long)CAR_LINE_SENSOR_COUNT);
+        OLED_Printf(0, 16, OLED_6X8, "Sweep B/W lines,");
+        OLED_Printf(0, 24, OLED_6X8, "then B3 or BT e");
+        return;
+    }
+
+    OLED_Printf(0,  0, OLED_6X8, "%s %s", task_name(App_Car_GetTask()),
+                state_name(s));
+    OLED_Printf(0,  8, OLED_6X8, "T:%2lu.%02lu",
+        (unsigned long)(elapsed/1000U), (unsigned int)((elapsed%1000U)/10U));
+    OLED_Printf(0, 16, OLED_6X8, "S:%3.0f D:%4lu",
+        (double)spd, (unsigned long)dist);
+    OLED_Printf(0, 24, OLED_6X8, "Tgt:%3.0f Stop:%4lu",
+        (double)App_Car_GetSpeed(), (unsigned long)App_Car_GetTargetMm());
     OLED_Printf(0, 32, OLED_6X8, "Acc:%.0f Max:%.0f",
         (double)App_Car_GetStraightAccel(), (double)App_Car_GetMaxSpeed());
-    OLED_Printf(0, 40, OLED_6X8, "S:%3.0f D:%4lu",
-        (double)spd, (unsigned long)dist);
-    OLED_Printf(0, 52, OLED_6X8, "KP:%.0f KI:%.1f KD:%.0f",
-        (double)LineControl_GetPID()->kp, (double)LineControl_GetPID()->ki,
-        (double)LineControl_GetPID()->kd);
+    OLED_Printf(0, 40, OLED_6X8, "KP:%.0f KD:%.0f",
+        (double)LineControl_GetPID()->kp, (double)LineControl_GetPID()->kd);
+    OLED_Printf(0, 48, OLED_6X8, "CAL:%s",
+        LineSensor_IsCalibrated() ? "OK" : "NO");
 }
 #endif
 
@@ -205,10 +232,24 @@ void App_Debug_Task(void)
 void App_Debug_OLEDTask(void)
 {
 #if CAR_OLED_SOFT_I2C_READY
-    if (!g_oledOk) return;
-    /* 运行中禁止刷屏：软件 I2C 全屏刷新约 40~50ms，会阻塞 200Hz 控制环，
-     * 导致小车失控、按键/蓝牙失灵。静止时刷新无影响。 */
-    if (App_Car_GetState() == CAR_STATE_RUNNING) return;
+    static uint32_t retryMs;
+    uint32_t now = BSP_Time_GetMs();
+    Car_State s   = App_Car_GetState();
+
+    /* 运行中绝不触碰 OLED：软件 I2C 阻塞传输（一页约 4~8 ms），
+     * 会打乱 200 Hz 控制环，造成速度抖动/按键偶发失灵。
+     * 停车/待机时才整屏刷新，此时车不动，阻塞无影响。 */
+    if (s == CAR_STATE_RUNNING) return;
+
+    /* 未连接时每 1 s 重试初始化，直到 OLED 应答为止。 */
+    if (!g_oledOk) {
+        if ((uint32_t)(now - retryMs) < 1000U) return;
+        retryMs = now;
+        OLED_Init();
+        g_oledOk = OLED_IsConnected();
+        if (!g_oledOk) return;
+    }
+
     render_oled();
     OLED_Update();
     g_oledOk = OLED_IsConnected();

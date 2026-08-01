@@ -44,6 +44,12 @@ void LineSensor_FinishCalibration(void);
 /** @brief 查询是否正在标定。 */
 bool LineSensor_IsCalibrating(void);
 
+/** @brief True once calibration finished with all channels valid. */
+bool LineSensor_IsCalibrated(void);
+
+/** @brief Number of channels whose calibrated span is large enough. */
+uint8_t LineSensor_GetCalOkCount(void);
+
 /** @return 最近一次处理结果的只读指针。 */
 const LineSensor_Data *LineSensor_GetData(void);
 
